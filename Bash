@@ -1,1 +1,2 @@
 pip install streamlit google-api-python-client wordcloud matplotlib pandas
+streamlit run app.py
