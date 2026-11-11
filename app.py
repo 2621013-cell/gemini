@@ -52,9 +52,20 @@ if api_key:
 
                 if video_response["items"]:
                     video_info = video_response["items"][0]
-                    title = video_info["snippet"]["title"]
-                    channel = video_info["snippet"]["channelTitle"]
+                    snippet = video_info["snippet"]
                     stats = video_info["statistics"]
+
+                    title = snippet["title"]
+                    channel = snippet["channelTitle"]
+
+                    # 썸네일 이미지 URL 추출 (고화질 우선, 없으면 기본화질)
+                    thumbnails = snippet.get("thumbnails", {})
+                    thumbnail_url = (
+                        thumbnails.get("maxres", {}).get("url")
+                        or thumbnails.get("high", {}).get("url")
+                        or thumbnails.get("medium", {}).get("url")
+                        or thumbnails.get("default", {}).get("url")
+                    )
 
                     view_count = int(stats.get("viewCount", 0))
                     like_count = int(stats.get("likeCount", 0))
@@ -63,11 +74,22 @@ if api_key:
                     st.subheader(f"📌 {title}")
                     st.caption(f"채널명: {channel}")
 
-                    # 지표 표시 (3개 컬럼)
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("조회수", f"{view_count:,} 회")
-                    col2.metric("좋아요 수", f"{like_count:,} 개")
-                    col3.metric("댓글 수", f"{comment_count:,} 개")
+                    # 썸네일 및 지표 레이아웃 (왼쪽: 썸네일, 오른쪽: 통계 지표)
+                    col_thumb, col_stats = st.columns([1, 2])
+
+                    with col_thumb:
+                        if thumbnail_url:
+                            st.image(
+                                thumbnail_url,
+                                use_container_width=True,
+                                caption="영상 썸네일",
+                            )
+
+                    with col_stats:
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("조회수", f"{view_count:,} 회")
+                        col2.metric("좋아요 수", f"{like_count:,} 개")
+                        col3.metric("댓글 수", f"{comment_count:,} 개")
 
                     st.markdown("---")
 
@@ -100,41 +122,9 @@ if api_key:
                     # 4. 워드클라우드 생성
                     st.subheader("☁️ 댓글 워드클라우드")
                     if comments:
-                        all_text = " ".join(comments)
+                        # 모든 댓글 합치기
+                        raw_text = " ".join(comments)
 
-                        try:
-                            # 깃허브 저장소에 함께 올린 나눔고딕 폰트 사용
-                            wordcloud = WordCloud(
-                                font_path="NanumGothic.ttf",
-                                width=800,
-                                height=400,
-                                background_color="white",
-                            ).generate(all_text)
-                        except Exception:
-                            # 폰트 파일 경로 문제가 생길 경우 기본 폰트로 생성
-                            wordcloud = WordCloud(
-                                width=800,
-                                height=400,
-                                background_color="white",
-                            ).generate(all_text)
-
-                        fig, ax = plt.subplots(figsize=(10, 5))
-                        ax.imshow(wordcloud, interpolation="bilinear")
-                        ax.axis("off")
-                        st.pyplot(fig)
-                    else:
-                        st.info("수집된 댓글이 없습니다.")
-
-                else:
-                    st.error(
-                        "영상을 찾을 수 없습니다. URL을 다시 확인해주세요."
-                    )
-
-            except Exception as e:
-                st.error(
-                    f"에러가 발생했습니다. API 키나 URL을 확인해주세요: {e}"
-                )
-        else:
-            st.warning("올바른 유튜브 링크 형식이 아닙니다.")
-else:
-    st.info("왼쪽 사이드바에 YouTube Data API 키를 입력해 주세요.")
+                        # 정규표현식으로 2글자 이상의 한글 단어만 추출 (특수문자, 1글자 조사 제거)
+                        korean_words = re.findall(r"[가-힣]{2,}", raw_text)
+                        processed_text = " ".join(korean_words)
