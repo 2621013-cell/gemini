@@ -1,132 +1,140 @@
-import streamlit as st
-import requests
-from kiwipiepy import Kiwi
-from wordcloud import WordCloud
-import matplotlib.pyplot as plt
 import re
+import matplotlib.pyplot as plt
+import pandas as pd
+import streamlit as st
+from googleapiclient.discovery import build
+from wordcloud import WordCloud
 
 # 페이지 기본 설정
-st.set_page_config(
-    page_title="유튜브 데이터 분석기",
-    page_icon="🎬",
-    layout="wide"
+st.set_page_config(page_title="유튜브 영상 & 댓글 분석기", layout="wide")
+st.title("📹 유튜브 영상 분석 및 댓글 워드클라우드")
+
+# 사이드바에서 API 키 입력 받기
+api_key = st.sidebar.text_input(
+    "YouTube Data API v3 키를 입력하세요:", type="password"
 )
 
-# Kiwi 형태소 분석기 캐싱 로드
-@st.cache_resource
-def load_kiwi():
-    return Kiwi()
 
-kiwi = load_kiwi()
-
-# 유튜브 동영상 ID 추출 함수
+# 유튜브 URL에서 Video ID 추출 함수
 def extract_video_id(url):
-    pattern = r'(?:v=|\/live\/|\/shorts\/|youtu\.be\/|\/embed\/)([a-zA-Z0-9_-]{11})'
+    pattern = r"(?:v=|\/([0-9A-Za-z_-]{11}).*|list=|\/embed\/|\/v\/|youtu\.be\/|\/shorts\/)([^#\&\?]*)"
     match = re.search(pattern, url)
-    return match.group(1) if match else None
-
-# 유튜브 댓글 수집 함수 (YouTube Data API v3)
-def fetch_youtube_comments(video_id, api_key, max_results=100):
-    url = "https://www.googleapis.com/youtube/v3/commentThreads"
-    params = {
-        "part": "snippet",
-        "videoId": video_id,
-        "key": api_key,
-        "maxResults": max_results,
-        "order": "relevance"
-    }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        data = response.json()
-        comments = []
-        for item in data.get("items", []):
-            text = item["snippet"]["topLevelComment"]["snippet"]["textDisplay"]
-            comments.append(text)
-        return comments
-    else:
-        st.error(f"댓글을 불러오는 데 실패했습니다. (오류 코드: {response.status_code})")
-        return []
-
-# 명사 추출 및 데이터 정제 함수
-def extract_nouns(comments):
-    full_text = " ".join(comments)
-    clean_text = re.sub(r'[^가-힣a-zA-Z\s]', '', full_text)
-    tokens = kiwi.tokenize(clean_text)
-    nouns = [token.form for token in tokens if token.tag.startswith('NN') and len(token.form) > 1]
-    return " ".join(nouns)
+    if match:
+        return match.group(1) or match.group(2)
+    return None
 
 
-# 메인 제목
-st.title("🎬 유튜브 통합 데이터 분석기")
-st.write("유튜브 링크를 입력하여 썸네일을 추출하거나 댓글 키워드를 분석해 보세요.")
+# 유튜브 API 호출 객체 생성
+def get_youtube_client(key):
+    return build("youtube", "v3", developerKey=key)
 
-# 사이드바 설정
-api_key = st.sidebar.text_input("유튜브 Data API 키 입력", type="password")
-font_path = st.sidebar.text_input("한글 폰트 경로", value="malgun.ttf")
 
-# 탭 메뉴 구성
-tab1, tab2 = st.tabs(["🖼️ 썸네일 추출기", "💬 댓글 분석 & 워드클라우드"])
+if api_key:
+    youtube = get_youtube_client(api_key)
 
-# [탭 1] 썸네일 추출 기능
-with tab1:
-    st.header("유튜브 썸네일 추출")
-    video_url_thumb = st.text_input(
-        "유튜브 영상 링크를 입력하세요:",
-        key="thumb_url",
-        placeholder="https://www.youtube.com/watch?v=..."
+    # 영상 링크 입력 받기
+    video_url = st.text_input(
+        "분석할 유튜브 영상 링크를 입력하세요:",
+        placeholder="https://www.youtube.com/watch?v=...",
     )
-    
-    if video_url_thumb:
-        video_id = extract_video_id(video_url_thumb)
+
+    if video_url:
+        video_id = extract_video_id(video_url)
+
         if video_id:
-            maxres_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
-            
-            st.image(maxres_url, caption="최고 화질 썸네일", use_container_width=True)
-            st.markdown(f"👉 **[원본 이미지 고화질 링크 열기]({maxres_url})**")
-        else:
-            st.warning("올바른 유튜브 URL 형식이 아닙니다.")
+            try:
+                # 1. 영상 기본 정보 및 통계 가져오기
+                video_response = (
+                    youtube.videos()
+                    .list(part="snippet,statistics", id=video_id)
+                    .execute()
+                )
 
-# [탭 2] 댓글 분석 및 워드클라우드 기능
-with tab2:
-    st.header("유튜브 댓글 분석 & 워드클라우드")
-    
-    video_url_comment = st.text_input(
-        "댓글을 분석할 유튜브 영상 링크를 입력하세요:",
-        key="comment_url",
-        placeholder="https://www.youtube.com/watch?v=..."
-    )
-    
-    if st.button("댓글 분석 시작"):
-        if not api_key:
-            st.warning("사이드바에 유튜브 Data API 키를 입력해야 댓글 수집이 가능합니다.")
-        elif not video_url_comment:
-            st.warning("분석할 유튜브 영상 링크를 입력해 주세요.")
-        else:
-            video_id = extract_video_id(video_url_comment)
-            if video_id:
-                with st.spinner("댓글 수집 중..."):
-                    comments = fetch_youtube_comments(video_id, api_key)
-                
-                if comments:
-                    st.success(f"총 {len(comments)}개의 댓글 수집 완료!")
-                    
-                    with st.spinner("형태소 분석 및 워드클라우드 생성 중..."):
-                        processed_text = extract_nouns(comments)
-                        
-                        if processed_text.strip():
-                            wc = WordCloud(
-                                font_path=font_path,
-                                background_color="white",
+                if video_response["items"]:
+                    video_info = video_response["items"][0]
+                    title = video_info["snippet"]["title"]
+                    channel = video_info["snippet"]["channelTitle"]
+                    stats = video_info["statistics"]
+
+                    view_count = int(stats.get("viewCount", 0))
+                    like_count = int(stats.get("likeCount", 0))
+                    comment_count = int(stats.get("commentCount", 0))
+
+                    st.subheader(f"📌 {title}")
+                    st.caption(f"채널명: {channel}")
+
+                    # 지표 표시 (3개 컬럼)
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("조회수", f"{view_count:,} 회")
+                    col2.metric("좋아요 수", f"{like_count:,} 개")
+                    col3.metric("댓글 수", f"{comment_count:,} 개")
+
+                    st.markdown("---")
+
+                    # 2. 댓글 가져오기 (최대 100개)
+                    with st.spinner("댓글 데이터를 수집 중입니다..."):
+                        comment_response = (
+                            youtube.commentThreads()
+                            .list(
+                                part="snippet",
+                                videoId=video_id,
+                                maxResults=100,
+                                textFormat="plainText",
+                            )
+                            .execute()
+                        )
+
+                        comments = []
+                        for item in comment_response.get("items", []):
+                            comment = item["snippet"]["topLevelComment"][
+                                "snippet"
+                            ]["textDisplay"]
+                            comments.append(comment)
+
+                    # 3. 댓글 예시 보여주기
+                    st.subheader("💬 주요 댓글 예시 (최신순)")
+                    with st.expander("댓글 보기 (최대 10개)", expanded=True):
+                        for i, comment in enumerate(comments[:10], 1):
+                            st.write(f"**{i}.** {comment}")
+
+                    # 4. 워드클라우드 생성
+                    st.subheader("☁️ 댓글 워드클라우드")
+                    if comments:
+                        all_text = " ".join(comments)
+
+                        try:
+                            # 깃허브 저장소에 함께 올린 나눔고딕 폰트 사용
+                            wordcloud = WordCloud(
+                                font_path="NanumGothic.ttf",
                                 width=800,
-                                height=400
-                            ).generate(processed_text)
-                            
-                            fig, ax = plt.subplots(figsize=(10, 5))
-                            ax.imshow(wc, interpolation='bilinear')
-                            ax.axis('off')
-                            
-                            st.pyplot(fig)
-                        else:
-                            st.info("분석할 수 있는 의미 있는 명사 키워드가 부족합니다.")
-            else:
-                st.warning("올바른 유튜브 URL 형식이 아닙니다.")
+                                height=400,
+                                background_color="white",
+                            ).generate(all_text)
+                        except Exception:
+                            # 폰트 파일 경로 문제가 생길 경우 기본 폰트로 생성
+                            wordcloud = WordCloud(
+                                width=800,
+                                height=400,
+                                background_color="white",
+                            ).generate(all_text)
+
+                        fig, ax = plt.subplots(figsize=(10, 5))
+                        ax.imshow(wordcloud, interpolation="bilinear")
+                        ax.axis("off")
+                        st.pyplot(fig)
+                    else:
+                        st.info("수집된 댓글이 없습니다.")
+
+                else:
+                    st.error(
+                        "영상을 찾을 수 없습니다. URL을 다시 확인해주세요."
+                    )
+
+            except Exception as e:
+                st.error(
+                    f"에러가 발생했습니다. API 키나 URL을 확인해주세요: {e}"
+                )
+        else:
+            st.warning("올바른 유튜브 링크 형식이 아닙니다.")
+else:
+    st.info("왼쪽 사이드바에 YouTube Data API 키를 입력해 주세요.")
