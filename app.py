@@ -58,7 +58,7 @@ if api_key:
                     title = snippet["title"]
                     channel = snippet["channelTitle"]
 
-                    # 썸네일 이미지 URL 추출 (고화질 우선, 없으면 기본화질)
+                    # 썸네일 이미지 URL 추출
                     thumbnails = snippet.get("thumbnails", {})
                     thumbnail_url = (
                         thumbnails.get("maxres", {}).get("url")
@@ -74,7 +74,7 @@ if api_key:
                     st.subheader(f"📌 {title}")
                     st.caption(f"채널명: {channel}")
 
-                    # 썸네일 및 지표 레이아웃 (왼쪽: 썸네일, 오른쪽: 통계 지표)
+                    # 썸네일 및 지표 레이아웃
                     col_thumb, col_stats = st.columns([1, 2])
 
                     with col_thumb:
@@ -122,9 +122,46 @@ if api_key:
                     # 4. 워드클라우드 생성
                     st.subheader("☁️ 댓글 워드클라우드")
                     if comments:
-                        # 모든 댓글 합치기
                         raw_text = " ".join(comments)
-
-                        # 정규표현식으로 2글자 이상의 한글 단어만 추출 (특수문자, 1글자 조사 제거)
                         korean_words = re.findall(r"[가-힣]{2,}", raw_text)
                         processed_text = " ".join(korean_words)
+
+                        if processed_text.strip():
+                            try:
+                                wordcloud = WordCloud(
+                                    font_path="NanumGothic.ttf",
+                                    width=800,
+                                    height=400,
+                                    background_color="white",
+                                ).generate(processed_text)
+                            except Exception:
+                                wordcloud = WordCloud(
+                                    width=800,
+                                    height=400,
+                                    background_color="white",
+                                ).generate(processed_text)
+
+                            fig, ax = plt.subplots(figsize=(10, 5))
+                            ax.imshow(wordcloud, interpolation="bilinear")
+                            ax.axis("off")
+                            st.pyplot(fig)
+                        else:
+                            st.warning(
+                                "워드클라우드를 생성할 유효한 한글 단어가 부족합니다."
+                            )
+                    else:
+                        st.info("수집된 댓글이 없습니다.")
+
+                else:
+                    st.error(
+                        "영상을 찾을 수 없습니다. URL을 다시 확인해주세요."
+                    )
+
+            except Exception as e:
+                st.error(
+                    f"에러가 발생했습니다. API 키나 URL을 확인해주세요: {e}"
+                )
+        else:
+            st.warning("올바른 유튜브 링크 형식이 아닙니다.")
+else:
+    st.info("왼쪽 사이드바에 YouTube Data API 키를 입력해 주세요.")
