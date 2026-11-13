@@ -1,5 +1,5 @@
 streamlit
-requests
-kiwipiepy
+google-api-python-client
 wordcloud
 matplotlib
+pandas
